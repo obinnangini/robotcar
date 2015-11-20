@@ -79,7 +79,7 @@ ISR(TIMER1_OVF_vect)          // timer compare interrupt service routine
 
   /* Set speed for next millisecond */
   motors.setSpeeds(
-    round(deadReckoningNextMotorSpeedA*calibratedMotorPwm(0.5, 0.5, deadReckoningNextMotorSpeedA)),
+    round(deadReckoningNextMotorSpeedA*calibratedMotorPwm(0.97, 1.0, deadReckoningNextMotorSpeedA)),
     round(deadReckoningNextMotorSpeedB*calibratedMotorPwm(1.0, 0.97, deadReckoningNextMotorSpeedB)));
   deadReckoningLastMotorSpeedA = deadReckoningNextMotorSpeedA;
   deadReckoningLastMotorSpeedB = deadReckoningNextMotorSpeedB;
@@ -174,47 +174,6 @@ void followLine(double speed) {
   deadReckoningSetMotors(round(speed+turn),round(speed-turn));
 }
 
-void calibrateMotorPwm(int speed) {
-  /* Drive in a straight line for the first segment */
-  while( ! (sensors[1]>500 && sensors[2]>500 && sensors[3]>500)) {
-    followLine(speed); // todo various speeds
-    //printSensors("A ");
-    delay(10);
-  }
-  delay(10);
-  deadReckoningSetMotors(0,0);
-  delay(1000);
-
-  /* Drive through cross */
-  //printSensors("B ");
-  deadReckoningSetMotors(speed,speed);
-  while(sensors[1]>500 && sensors[2]>500 && sensors[3]>500) {
-    robot.readLine(sensors, IR_EMITTERS_ON);
-    //printSensors("A ");
-    delay(10);
-  }
-  delay(10);
-  deadReckoningSetMotors(0,0);
-  delay(1000);
-
-  /* For second segment, drive blindly */
-  unsigned int positionA = robot.readLine(sensors, IR_EMITTERS_ON);
-  deadReckoningSetMotors(speed,speed);
-  while( ! (sensors[1]>500 && sensors[2]>500)
-  || !(sensors[2]>500 && sensors[3]>500)) {
-    robot.readLine(sensors, IR_EMITTERS_ON);
-    //printSensors("C ");
-    delay(10);
-  }
-  deadReckoningSetMotors(0,0);
-
-  /* See where the line has moved */
-  unsigned int positionB = robot.readLine(sensors, IR_EMITTERS_ON);
-  lcd.clear();
-  lcd.gotoXY(0,0); lcd.print(positionA);
-  lcd.gotoXY(0,1); lcd.print(positionB);
-}
-
 int speedFunction(){
   return 100;
 }
@@ -222,14 +181,9 @@ int speedFunction(){
 int totalMilliseconds = 0;
 int delayMilliseconds = 10;
 void loop() {
-  /* Square dance 
-  goForward();
-  printDistance();
-  delay(1000);
-  turnRight();
-  printDistance();
-  delay(1000);
-  */
+  /* Determine at what speed we should be travelling */
+  int speed = speedFunction();
+
   // Get the position of the line.  Note that we *must* provide
   // the "sensors" argument to read_line() here, even though we
   // are not interested in the individual sensor readings.
@@ -242,7 +196,7 @@ void loop() {
     // to do a sharp turn to the left.  Note that the maximum
     // value of either motor speed is 255, so we are driving
     // it at just about 40% of the max.
-    OrangutanMotors::setSpeeds(0, 100);
+    deadReckoningSetMotors(0, speed);
 
     // Just for fun, indicate the direction we are turning on
     // the LEDs.
@@ -261,28 +215,8 @@ void loop() {
   else
   {
     // We are far to the left of the line: turn right.
-    OrangutanMotors::setSpeeds(100, 0);
+    deadReckoningSetMotors(speed, 0);
     OrangutanLEDs::left(LOW);
     OrangutanLEDs::right(HIGH);
   }
-    
-
-  /* Bouncing ball */
-//  int speed = verticalSpeedAfterBeingThrownUp(totalMilliseconds);
-//  if (speed < -1*vi) {
-//    deadReckoningSetMotors(0,0);
-//    delay(1);
-//    totalMilliseconds=0;
-//    vi = 0.9*vi;
-//    return;
-//  }
-//  deadReckoningSetMotors(speed,speed);
-//  totalMilliseconds += delayMilliseconds;
-//  delay(delayMilliseconds);
-  
-
-  /* Calibration 
-  calibrateMotorPwm(50);
-  while(true);
-  */
 }
