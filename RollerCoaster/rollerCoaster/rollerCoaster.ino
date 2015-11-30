@@ -67,39 +67,29 @@ int deadReckoningNextMotorSpeedB=0;
 /* TODO: long might overflow after 842s of full speed */
 long deadReckoningDistanceA=0;
 long deadReckoningDistanceB=0;
+long deadReckoningTime=0;
 
 ISR(TIMER1_OVF_vect)          // timer compare interrupt service routine
 {
   /* Must pre-load time to keep interrupt period constant*/
   TCNT1 = counterPreset;
 
+  /* Increment time tracking */
+  deadReckoningTime++;
+  
   /* Add a millisecond worth of distance */
   deadReckoningDistanceA += deadReckoningLastMotorSpeedA;
   deadReckoningDistanceB += deadReckoningLastMotorSpeedB;
 
   /* Set speed for next millisecond */
-  motors.setSpeeds(
-    round(deadReckoningNextMotorSpeedA*calibratedMotorPwm(0.97, 1.0, deadReckoningNextMotorSpeedA)),
-    round(deadReckoningNextMotorSpeedB*calibratedMotorPwm(1.0, 0.97, deadReckoningNextMotorSpeedB)));
+  motors.setSpeeds(deadReckoningNextMotorSpeedA,deadReckoningNextMotorSpeedB);
   deadReckoningLastMotorSpeedA = deadReckoningNextMotorSpeedA;
   deadReckoningLastMotorSpeedB = deadReckoningNextMotorSpeedB;
-  
-  /* Blink LED, just for fun */
-  if (++count==1000) {
-    count=0;
-   if (ledOn) {
-    leds.red(LOW);
-    ledOn = false;
-   } else {
-    leds.red(HIGH);
-    ledOn = true;
-   }
-  }
 }
 
 void deadReckoningSetMotors(int speedA, int speedB) {
-  deadReckoningNextMotorSpeedA = speedA;
-  deadReckoningNextMotorSpeedB = speedB;
+  deadReckoningNextMotorSpeedA = round(speedA*calibratedMotorPwm(0.97, 1.0, speedA));
+  deadReckoningNextMotorSpeedB = round(speedB*calibratedMotorPwm(1.0, 0.97, speedB));
 }
 
 /* TODO locking of shared variables? */
@@ -109,34 +99,14 @@ long deadReckoningGetMotorADistance() {
 long deadReckoningGetMotorBDistance() {
   return deadReckoningDistanceB;
 }
-void deadReckoningResetMotorDistances() {
+void deadReckoningReset() {
   deadReckoningDistanceA=0;
   deadReckoningDistanceB=0;
+  deadReckoningTime=0;
 }
 
 double calibratedMotorPwm(double A, double B, double speed) {
   return (B-A)/255*speed + A;
-}
-
-const int turnSpeed = 61;
-const int turnTimeMilis = 251;
-
-void turnRight() {
-  deadReckoningSetMotors(turnSpeed,-1 * turnSpeed);
-  delay(turnTimeMilis);
-  deadReckoningSetMotors(0,0);
-}
-
-void turnLeft() {
-  deadReckoningSetMotors(-1 * turnSpeed,turnSpeed);
-  delay(turnTimeMilis);
-  deadReckoningSetMotors(0,0);
-}
-
-void goForward() {
-  deadReckoningSetMotors(turnSpeed,turnSpeed);
-  delay(turnTimeMilis * 2);
-  deadReckoningSetMotors(0,0);
 }
 
 void printDistance() {
@@ -152,20 +122,6 @@ void printDistance() {
  lcd.print(deadReckoningGetMotorBDistance());  
 }
 
-void printSensors(char* message) {
-  lcd.clear();
-  lcd.gotoXY(0,0); lcd.print(message); lcd.print(sensors[1]); 
-  lcd.gotoXY(0,1); lcd.print(sensors[2]); lcd.print(sensors[3]);
-}
-
-double g=64.0;
-double vi=64.0;
-int verticalSpeedAfterBeingThrownUp(double milliseconds) {
-  /* displacement = ax+bx^2 */
-  /* speed = a + 2bx */
-  return round(vi-milliseconds/1000.0*g);
-}
-
 int direction = 0;
 double maxWheelDifference = 50.0;
 void followLine(double speed) {
@@ -174,20 +130,108 @@ void followLine(double speed) {
   deadReckoningSetMotors(round(speed+turn),round(speed-turn));
 }
 
+double maxHeight = 6.0;
+double x = 0.0;
+double y = 4.0;
+double theta = 0.0;
 int speedFunction(){
-  return 100;
+
+    double sl = deadReckoningGetMotorADistance()/12800.0;
+    double sr = deadReckoningGetMotorBDistance()/12800.0;
+    double b = 1.0; // wheel base
+    double time = deadReckoningTime;
+    deadReckoningReset();
+  if (sl==sr) {
+    y += sl*sin(theta);
+  } else {
+    double s = (sr+sl)/2.0;
+    theta += (sr - sl)/b;
+    x += s*cos(theta);
+    y += s*sin(theta);
+
+ /*
+    double r = (a+b)/2.0/(a-b);
+
+    double relativeTheta = 360.0 * (a-b) / 2.0 / 3.1415927;
+    theta += relativeTheta;
+
+    double relativeY = r * sin(relativeTheta);
+    y += relativeY; //*sin(theta+90);
+    */
+  }
+  if (y>maxHeight) {
+    y=maxHeight;
+  }
+  if (y<0.0) {
+    y=0.0;
+  }
+  double speed = 128.0*(maxHeight - y)/maxHeight;
+  if (speed < 16.0) speed = 16.0;
+  return round(speed);
+}
+
+void turn(double r, int velocity) {
+  double bottomR = r-0.5;
+  double topR = r+0.5;
+  
+  double ratioBottom = bottomR/topR;
+    deadReckoningSetMotors(velocity, ratioBottom*velocity);
+}
+
+double getRadiusbyTime(double time) {
+  double timeSeconds = time/200.0;
+  /* Linear 
+  return -0.007*time + 1000;
+  */
+  /* Parabolic */
+  return 2.0*timeSeconds*timeSeconds - 8.0*timeSeconds + 9.0;
 }
 
 int totalMilliseconds = 0;
 int delayMilliseconds = 10;
+unsigned int last_proportional = 0;
+long integral = 0;
+double r = 15.0;
+
 void loop() {
+  delay(1);
   /* Determine at what speed we should be travelling */
   int speed = speedFunction();
+  lcd.clear();
+lcd.print(round(100.0*x));
+lcd.print(",");
+lcd.print(round(100.0*y));
+lcd.gotoXY(0,1);
+lcd.print(round(100.0*theta));
 
+   unsigned int position = robot.readLine(sensors, IR_EMITTERS_ON);
+   if(position == 4000 || position == 0) {
+      turn(getRadiusbyTime(deadReckoningTime), speed);
+   } else {
+    int proportional = (int)position - 2000;
+    int derivative = proportional - last_proportional;
+    integral += proportional;
+    last_proportional = proportional;
+    int power_difference = proportional/20 + integral/10000 + derivative*3/2;
+//    const int maximum = 100;
+    if (power_difference > speed)
+      power_difference = speed;
+    if (power_difference < -speed)
+      power_difference = -speed;
+  
+    if (power_difference < 0)
+      deadReckoningSetMotors(speed + power_difference, speed);
+    else
+      deadReckoningSetMotors(speed, speed - power_difference);
+   }
+  return;
+//deadReckoningSetMotors(speed,speed);
+//return;
   // Get the position of the line.  Note that we *must* provide
   // the "sensors" argument to read_line() here, even though we
   // are not interested in the individual sensor readings.
-  unsigned int position = robot.readLine(sensors, IR_EMITTERS_ON);
+
+  
   if (position < 1000)
   {
     // We are far to the right of the line: turn left.
