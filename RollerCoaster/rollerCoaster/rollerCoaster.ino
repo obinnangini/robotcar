@@ -122,7 +122,6 @@ void printDistance() {
  lcd.print(deadReckoningGetMotorBDistance());  
 }
 
-int direction = 0;
 double maxWheelDifference = 50.0;
 void followLine(double speed) {
   double linePosition = robot.readLine(sensors, IR_EMITTERS_ON);
@@ -130,10 +129,17 @@ void followLine(double speed) {
   deadReckoningSetMotors(round(speed+turn),round(speed-turn));
 }
 
-double maxHeight = 6.0;
+int totalMilliseconds = 0;
+int delayMilliseconds = 10;
+unsigned int last_proportional = 0;
+long integral = 0;
+double jumpspeed = 0;
+double direction = -1.0;
+double maxHeight = 11.0;
 double x = 0.0;
-double y = 4.0;
-double theta = 0.0;
+double y = 9.0;
+double theta = 3.1415927;
+
 int speedFunction(){
 
     double sl = deadReckoningGetMotorADistance()/12800.0;
@@ -170,12 +176,20 @@ int speedFunction(){
   return round(speed);
 }
 
-void turn(double r, int velocity) {
+void turn(double r, int velocity, boolean right) {
   double bottomR = r-0.5;
   double topR = r+0.5;
   
   double ratioBottom = bottomR/topR;
+  if (right) {
     deadReckoningSetMotors(velocity, ratioBottom*velocity);
+  } else {
+    deadReckoningSetMotors(ratioBottom*velocity, velocity);
+  }
+}
+
+int jeffsReadLine() {
+  
 }
 
 double getRadiusbyTime(double time) {
@@ -184,30 +198,52 @@ double getRadiusbyTime(double time) {
   return -0.007*time + 1000;
   */
   /* Parabolic */
-  return 2.0*timeSeconds*timeSeconds - 8.0*timeSeconds + 9.0;
+  return 1.0*timeSeconds*timeSeconds - 5.0*timeSeconds + 9.0;
 }
 
-int totalMilliseconds = 0;
-int delayMilliseconds = 10;
-unsigned int last_proportional = 0;
-long integral = 0;
-double r = 15.0;
+boolean atCross() {
+  return sensors[0]>200 && sensors[4]>200;
+}
 
 void loop() {
   delay(1);
   /* Determine at what speed we should be travelling */
   int speed = speedFunction();
-  lcd.clear();
-lcd.print(round(100.0*x));
-lcd.print(",");
-lcd.print(round(100.0*y));
-lcd.gotoXY(0,1);
-lcd.print(round(100.0*theta));
-
+  
    unsigned int position = robot.readLine(sensors, IR_EMITTERS_ON);
-   if(position == 4000 || position == 0) {
-      turn(getRadiusbyTime(deadReckoningTime), speed);
+  lcd.clear();
+lcd.print(position);
+//lcd.print(",");
+//lcd.print(sensors[4]);
+//lcd.gotoXY(0,1);
+//lcd.print(round(100.0*theta));
+
+   if (atCross()) {
+    deadReckoningSetMotors(0,0);
+    delay(500);
+    deadReckoningSetMotors(-62,62);
+    delay(480);
+    deadReckoningSetMotors(0,0);
+    delay(5000);
+    direction = -1.0 * direction;
+    deadReckoningTime = 0;
+    deadReckoningReset();
+    if (direction>0)
+      theta=0.0;
+    else
+      theta=3.1415927;
+    deadReckoningReset();
+    y=9.0;
+    return;
+   } else if(position == 4000 || position == 0) {
+    double r = getRadiusbyTime((direction>0)?16:16);
+    if (direction>0) r = 10;
+    else r=11;
+    speed = jumpspeed*(r/9.0);
+    turn(r, speed, direction > 0.0);
    } else {
+    deadReckoningTime = 0;
+    jumpspeed = speed;
     int proportional = (int)position - 2000;
     int derivative = proportional - last_proportional;
     integral += proportional;
